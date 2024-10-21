@@ -153,3 +153,92 @@ curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.13-3.8.0.tgz" -o ~/Downlo
 ~/kafka/bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic TutorialTopic
 ~/kafka/bin/kafka-topics.sh --delete --bootstrap-server localhost:9092 --topic TutorialTopic # delete topic
 ```
+
+# Demo 2: A longer flow
+## Quick start
+
+## Build from scratch
+```bash
+cd Kafka-VM
+docker compose up -d
+
+brew services start postgresql@16
+    \c db_airflow
+    \dt
+brew services start mysql
+brew services stop postgresql@16
+brew services stop mysql
+```
+- Open: http://localhost:9000 to access the Kafka UI and inspect the topics and messages.
+
+To demonstrate the Debezium Postgres **source** connector and JDBC **sink** connector using your Docker Compose setup, you need to follow these steps:
+1. Create the PostgreSQL Source Connector:
+```bash
+# Send the connector configuration to Kafka Connect. 
+# This will create the Debezium source connector that reads changes from your PostgreSQL database and publishes them to the Kafka topic.
+curl -X POST http://localhost:8083/connectors \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "debezium-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "192.168.1.244",
+    "database.port": "5432",
+    "database.user": "user_airflow",
+    "database.password": "1234",
+    "database.dbname": "db_airflow",
+    "database.server.name": "source",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium",
+    "publication.name": "dbz_publication",
+    "table.include.list": "E00Status",
+    "database.history.kafka.bootstrap.servers": "kafka1:29092",
+    "database.history.kafka.topic": "schema-changes.sales",
+    "topic.prefix": "source",
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
+    "transforms.route.replacement": "$3"
+  }
+}'
+# You should see the `debezium-postgres-connector` in the list of connectors
+curl http://localhost:8083/connectors/
+```
+2. Create the JDBC Sink Connector
+```bash
+# Send the sink connector configuration
+
+curl -X POST http://localhost:8083/connectors \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "jdbc-sink-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
+    "tasks.max": "1",
+    "topics": "<topic_was_generated_from_source>",
+    "connection.url": "jdbc:mysql://<your_ip>:3306/db_kafka",
+    "connection.username": "user_airflow",
+    "connection.password": "admin@123",
+    "auto.create": "true",
+    "auto.evolve": "true",
+    "insert.mode": "upsert",
+    "primary.key.fields": "id",
+    "primary.key.mode": "record_key",
+    "schema.evolution": "basic",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true"
+  }
+}'
+# The connector should appear in the list with the name `jdbc-sink-connector`
+curl http://localhost:8083/connectors/
+```
+3. Verify Data Flow
+   - PostgreSQL to Kafka: To test the data flow, modify a record in the PostgreSQL source database (insert, update, or delete). The Debezium source connector should capture the change and publish it to the Kafka topic.
+   - Kafka to MySQL: The JDBC sink connector will pick up this change and apply it to your MySQL destination.
+
+For troubleshooting: `docker logs debezium`
