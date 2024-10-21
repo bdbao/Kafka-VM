@@ -14,11 +14,8 @@ sudo adduser kafka # e.g: password is 1234
 sudo adduser kafka sudo
 su -l kafka
 
-sudo apt update
-sudo apt install openjdk-11-jre-headless -y
-
 cd ~ && git clone https://github.com/bdbao/Kafka-VM
-curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.12-3.8.0.tgz" -o kafka.tgz
+curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.13-3.8.0.tgz" -o kafka.tgz
 mkdir kafka && cd kafka
 tar -xvzf ~/kafka.tgz --strip 1
 cp ~/Kafka-VM/config/server.properties ./config
@@ -28,28 +25,33 @@ sudo cp ~/Kafka-VM/system/* /etc/systemd/system
 # get python 3.8
 sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
-sudo apt install python3.8
+sudo apt install python3.8 -y
 python3.8 --version
 
 # Create Virtual Environment
-sudo apt install python3.8-venv
+sudo apt install python3.8-venv -y
 python3.8 -m venv myenv && source myenv/bin/activate
-# pip install --upgrade pip
-pip install kafka-python
 # rm -rf ~/kafka/myenv
+
+pip install kafka-python
+sudo apt install openjdk-11-jre-headless -y
 
 sudo systemctl enable zookeeper
 sudo systemctl start zookeeper
-sudo systemctl status zookeeper
 sudo systemctl enable kafka
 sudo systemctl start kafka
+sudo systemctl status zookeeper
 sudo systemctl status kafka
-```
-Open 2 terminals for these 2 commnands:
-```bash
+
 python3.8 scripts/consumer.py
-python3.8 scripts/producer.py
 ```
+Open another terminal:
+```bash
+su -l kafka # pass: 1234
+cd kafka && source myenv/bin/activate
+python3.8 scripts/producer.py --mess "This is a message"
+```
+Then we can see update in the first terminal. This is **DONE**!
 
 ## Build from scratch
 ```bash
@@ -60,15 +62,14 @@ Move to Ubuntu shell
 ```bash
 sudo adduser kafka
 sudo adduser kafka sudo
-su -l kafka
-    1234
+su -l kafka # pass: 1234
 
 sudo apt update
 sudo apt install openjdk-11-jre-headless -y
 java --version
 
 mkdir ~/Downloads
-curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.12-3.8.0.tgz" -o ~/Downloads/kafka.tgz
+curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.13-3.8.0.tgz" -o ~/Downloads/kafka.tgz
 mkdir ~/kafka && cd ~/kafka
 tar -xvzf ~/Downloads/kafka.tgz --strip 1
 readlink -f $(which java)
@@ -147,7 +148,7 @@ sudo apt install openjdk-11-jre-headless -y
 java --version
 
 # For kafka 3.x
-curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.12-3.8.0.tgz" -o ~/Downloads/kafka.tgz
+curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.13-3.8.0.tgz" -o ~/Downloads/kafka.tgz
 
 ~/kafka/bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic TutorialTopic
 ~/kafka/bin/kafka-topics.sh --delete --bootstrap-server localhost:9092 --topic TutorialTopic # delete topic
