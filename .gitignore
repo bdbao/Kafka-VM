@@ -1,1 +1,4 @@
 .DS_Store
+test/
+mysql-connector-j-8.0.31/*
+!*.jar
