@@ -158,16 +158,21 @@ curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.13-3.8.0.tgz" -o ~/Downlo
 ![demo2 info](images/demo2.png)
 ## Quick start
 ```bash
+# curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" https://localhost:8083/connectors/ -k -d @sink-mysql.json
+# curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" https://localhost:8083/connectors/ -k -d @source-mysql.json
 make startdb
 docker compose up -d 
 
-curl -X POST http://localhost:8083/connectors \
--H "Content-Type: application/json" \
+# curl -X POST http://localhost:8083/connectors \
+# -H "Content-Type: application/json" \
+curl -i -X POST http://localhost:8083/connectors/ \
+-H "Accept:application/json" \
+-H "Content-Type:application/json" \
 -d '{
   "name": "debezium-postgres-connector",
   "config": {
     "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-    "tasks.max": "1",
+    "tasks.max": "3",
     "database.hostname": "host.docker.internal",
     "database.port": "5432",
     "database.user": "user_kafka",
@@ -177,7 +182,7 @@ curl -X POST http://localhost:8083/connectors \
     "plugin.name": "pgoutput",
     "slot.name": "debezium",
     "publication.name": "dbz_publication",
-    "table.include.list": "E00Status",
+    "table.include.list": "public.E00Status",
     "database.history.kafka.bootstrap.servers": "kafka1:29092",
     "database.history.kafka.topic": "schema-changes.sales",
     "topic.prefix": "source",
@@ -189,21 +194,23 @@ curl -X POST http://localhost:8083/connectors \
 }'
 
 
-curl -X POST http://localhost:8083/connectors \
--H "Content-Type: application/json" \
+# curl -X POST http://localhost:8083/connectors \
+# -H "Content-Type: application/json" \
+curl -i -X POST http://localhost:8083/connectors/ \
+-H "Accept:application/json" \
+-H "Content-Type:application/json" \
 -d '{
   "name": "jdbc-sink-connector",
   "config": {
     "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
-    "tasks.max": "1",
-    "topics": "source.E00Status",
+    "tasks.max": "3",
+    "topics": "E00Status",
     "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
     "connection.username": "user_kafka",
     "connection.password": "Admin@123",
     "auto.create": "true",
     "auto.evolve": "true",
     "insert.mode": "upsert",
-    "primary.key.fields": "id",
     "primary.key.mode": "record_key",
     "schema.evolution": "basic",
     "transforms": "unwrap",
@@ -217,8 +224,29 @@ curl -X POST http://localhost:8083/connectors \
 
 
 psql -h localhost -U user_kafka -d db_kafka
-  INSERT INTO "E00Status" (status) VALUES ('New Status');
+  \c db_kafka;
 
+  -- Create a sample table named 'E00Status'
+  CREATE TABLE "E00Status" (
+      id SERIAL PRIMARY KEY,
+      status VARCHAR(50) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Insert sample data into the E00Status table
+  INSERT INTO "E00Status" (status) VALUES
+  ('Active'),
+  ('Inactive'),
+  ('Pending'),
+  ('Completed'),
+  ('Failed');
+
+psql -h localhost -U user_kafka -d db_kafka
+  INSERT INTO "E00Status" (status) VALUES ('New Status');
+mysql -h localhost -P 3306 -u user_kafka -d db_kafka -p
+
+make clean
+make stop
 ```
 ## Build from scratch
 ```bash
@@ -313,6 +341,36 @@ curl -X POST http://localhost:8083/connectors \
     "transforms.route.replacement": "$3"
   }
 }'
+
+# script short ok
+curl -i -X POST http://localhost:8083/connectors/ \
+-H "Accept:application/json" \
+-H "Content-Type:application/json" \
+-d '{
+  "name": "debezium-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "host.docker.internal",
+    "database.port": "5432",
+    "database.user": "user_kafka",
+    "database.password": "1234",
+    "database.dbname": "db_kafka",
+    "database.server.name": "source",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium",
+    "publication.name": "dbz_publication",
+    "table.include.list": "E00Status",
+    "database.history.kafka.bootstrap.servers": "kafka1:29092",
+    "database.history.kafka.topic": "schema-changes.sales",
+    "topic.prefix": "source",
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
+    "transforms.route.replacement": "$3"
+  }
+}'
+
 ```
 Output is like:
 ```
@@ -432,6 +490,59 @@ curl -X POST http://localhost:8083/connectors \
     "hibernate.dialect": "org.hibernate.dialect.MySQL8Dialect"
   }
 }'
+
+# script short oke
+curl -i -X POST http://localhost:8083/connectors/ \
+-H "Accept:application/json" \
+-H "Content-Type:application/json" \
+-d '{
+  "name": "jdbc-sink-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
+    "tasks.max": "1",
+    "topics": "source.E00Status",
+    "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
+    "connection.username": "user_kafka",
+    "connection.password": "Admin@123",
+    "auto.create": "true",
+    "auto.evolve": "true",
+    "insert.mode": "upsert",
+    "primary.key.fields": "id",
+    "primary.key.mode": "record_key",
+    "schema.evolution": "basic",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true"
+  }
+}'
+curl -i -X POST http://localhost:8083/connectors/ \
+-H "Accept:application/json" \
+-H "Content-Type:application/json" \
+-d '{
+  "name": "jdbc-sink-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
+    "tasks.max": "3",
+    "topics": "E00Status",
+    "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
+    "connection.username": "user_kafka",
+    "connection.password": "Admin@123",
+    "auto.create": "true",
+    "auto.evolve": "true",
+    "insert.mode": "upsert",
+    "primary.key.mode": "record_key",
+    "schema.evolution": "basic",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true"
+  }
+}'
 ```
 Output is like:
 ```
@@ -456,3 +567,8 @@ For troubleshooting: `docker logs debezium`
 - Host Db on local machine, host airflow/kafka on Docker:
   - Call db_url from local machine: `localhost`
   - Call db_url form Docker container: `host.docker.internal`
+- Some other repo:
+  - [mysql to postgres](https://blog.devgenius.io/change-data-capture-from-mysql-to-postgresql-using-kafka-connect-and-debezium-ae8740ef3a1d)
+  - [mysql to mysql](https://medium.com/@alexander.murylev/kafka-connect-debezium-mysql-source-sink-replication-pipeline-fb4d7e9df790)
+  - [Dezebium for postgres](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)
+  
