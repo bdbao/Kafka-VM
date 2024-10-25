@@ -155,8 +155,71 @@ curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.13-3.8.0.tgz" -o ~/Downlo
 ```
 
 # Demo 2: Streamming between 2 DBMS using Kafka on Docker
+![demo2 info](images/demo2.png)
 ## Quick start
+```bash
+make startdb
+docker compose up -d 
 
+curl -X POST http://localhost:8083/connectors \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "debezium-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "host.docker.internal",
+    "database.port": "5432",
+    "database.user": "user_kafka",
+    "database.password": "1234",
+    "database.dbname": "db_kafka",
+    "database.server.name": "source",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium",
+    "publication.name": "dbz_publication",
+    "table.include.list": "E00Status",
+    "database.history.kafka.bootstrap.servers": "kafka1:29092",
+    "database.history.kafka.topic": "schema-changes.sales",
+    "topic.prefix": "source",
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
+    "transforms.route.replacement": "$3"
+  }
+}'
+
+
+curl -X POST http://localhost:8083/connectors \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "jdbc-sink-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
+    "tasks.max": "1",
+    "topics": "source.E00Status",
+    "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
+    "connection.username": "user_kafka",
+    "connection.password": "Admin@123",
+    "auto.create": "true",
+    "auto.evolve": "true",
+    "insert.mode": "upsert",
+    "primary.key.fields": "id",
+    "primary.key.mode": "record_key",
+    "schema.evolution": "basic",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true"
+  }
+}'
+
+
+psql -h localhost -U user_kafka -d db_kafka
+  INSERT INTO "E00Status" (status) VALUES ('New Status');
+
+```
 ## Build from scratch
 ```bash
 cd Kafka-VM
@@ -209,13 +272,14 @@ psql -U postgres
 
   \q # quit psql postgres
 
-# delete old Replication slot, or change 'slot.name'
+# (Fix the bug) connection 1
 psql -h localhost -U user_kafka -d db_kafka # Check connection to db
   SHOW config_file;
   # Change `wal_level = logical`, uncomment this line
   # brew services restart postgresql@16
   SHOW wal_level;
 
+  # If create new one: delete old Replication slot, or change 'slot.name'
   SELECT * FROM pg_replication_slots;
   SELECT pg_drop_replication_slot('debezium');
   SELECT * FROM pg_replication_slots;
@@ -252,7 +316,7 @@ curl -X POST http://localhost:8083/connectors \
 ```
 Output is like:
 ```
-{"name":"debezium-postgres-connector","config":{"connector.class":"io.debezium.connector.postgresql.PostgresConnector","tasks.max":"1","database.hostname":"host.docker.internal","database.port":"5432","database.user":"user_kafka","database.password":"1234","database.dbname":"db_kafka","database.server.name":"source","plugin.name":"pgoutput","slot.name":"debezium","publication.name":"dbz_publication","table.include.list":"E00Status","database.history.kafka.bootstrap.servers":"kafka1:29092","database.history.kafka.topic":"schema-changes.sales","topic.prefix":"source","transforms":"route","transforms.route.type":"org.apache.kafka.connect.transforms.RegexRouter","transforms.route.regex":"([^.]+)\\.([^.]+)\\.([^.]+)","transforms.route.replacement":"$3","name":"debezium-postgres-connector"},"tasks":[],"type":"source"}% 
+{"name":"debezium-postgres-connector","config":{"connector.class":"io.debezium.connector.postgresql.PostgresConnector","tasks.max":"1","database.hostname":"host.docker.internal","database.port":"5432","database.user":"user_kafka","database.password":"1234","database.dbname":"db_kafka","database.server.name":"source","plugin.name":"pgoutput","slot.name":"debezium","publication.name":"dbz_publication","table.include.list":"E00Status","database.history.kafka.bootstrap.servers":"kafka1:29092","database.history.kafka.topic":"schema-changes.sales","topic.prefix":"source","transforms":"route","transforms.route.type":"org.apache.kafka.connect.transforms.RegexRouter","transforms.route.regex":"([^.]+)\\.([^.]+)\\.([^.]+)","transforms.route.replacement":"$3","name":"debezium-postgres-connector"},"tasks":[],"type":"source"}%
 ```
 - Script to capture the change:
 ```bash
@@ -325,7 +389,7 @@ mysql --version
 mysql -h localhost -P 3306 -u user_kafka -p # pass: Admin@123
 ```
 
-2.1. Add MySQL JDBC Driver to Kafka in Docker
+2.1. (Fix the bug: org.hibernate.exception.GenericJDBCException: Unable to acquire JDBC Connection [Connections could not be acquired from the underlying database!]) Add MySQL JDBC Driver to Kafka in Docker
 Download: https://downloads.mysql.com/archives/get/p/3/file/mysql-connector-j-8.0.31.zip
 ```bash
 docker volume create kafka-jdbc
