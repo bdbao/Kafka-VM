@@ -163,65 +163,8 @@ curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.13-3.8.0.tgz" -o ~/Downlo
 make startdb
 docker compose up -d 
 
-# curl -X POST http://localhost:8083/connectors \
-# -H "Content-Type: application/json" \
-curl -i -X POST http://localhost:8083/connectors/ \
--H "Accept:application/json" \
--H "Content-Type:application/json" \
--d '{
-  "name": "debezium-postgres-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-    "tasks.max": "3",
-    "database.hostname": "host.docker.internal",
-    "database.port": "5432",
-    "database.user": "user_kafka",
-    "database.password": "1234",
-    "database.dbname": "db_kafka",
-    "database.server.name": "source",
-    "plugin.name": "pgoutput",
-    "slot.name": "debezium",
-    "publication.name": "dbz_publication",
-    "table.include.list": "public.E00Status",
-    "database.history.kafka.bootstrap.servers": "kafka1:29092",
-    "database.history.kafka.topic": "schema-changes.sales",
-    "topic.prefix": "source",
-    "transforms": "route",
-    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
-    "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
-    "transforms.route.replacement": "$3"
-  }
-}'
-
-
-# curl -X POST http://localhost:8083/connectors \
-# -H "Content-Type: application/json" \
-curl -i -X POST http://localhost:8083/connectors/ \
--H "Accept:application/json" \
--H "Content-Type:application/json" \
--d '{
-  "name": "jdbc-sink-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
-    "tasks.max": "3",
-    "topics": "E00Status",
-    "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
-    "connection.username": "user_kafka",
-    "connection.password": "Admin@123",
-    "auto.create": "true",
-    "auto.evolve": "true",
-    "insert.mode": "upsert",
-    "primary.key.mode": "record_key",
-    "schema.evolution": "basic",
-    "transforms": "unwrap",
-    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
-    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "key.converter.schemas.enable": "true",
-    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "value.converter.schemas.enable": "true"
-  }
-}'
-
+make source
+make sink
 
 psql -h localhost -U user_kafka -d db_kafka
   \c db_kafka;
@@ -553,6 +496,20 @@ Check the status of the JDBC connector:
 curl http://localhost:8083/connectors/
 # The connector should appear in the list with the name `["debezium-postgres-connector","jdbc-sink-connector"]%`
 ```
+
+
+```
+-- Grant access to root from host.docker.internal without a password
+CREATE USER 'root'@'host.docker.internal' IDENTIFIED BY '';
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'host.docker.internal' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+
+
+
+
+```
+
+
 3. Verify Data Flow (DBeaver for viewing)
    - PostgreSQL to Kafka: To test the data flow, modify a record in the PostgreSQL source database (insert, update, or delete). The Debezium source connector should capture the change and publish it to the Kafka topic.
    - Kafka to MySQL: The JDBC sink connector will pick up this change and apply it to your MySQL destination.

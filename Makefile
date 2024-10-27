@@ -37,4 +37,11 @@ stopdb:
 	brew services stop $(POSTGRES_NAME)
 	brew services stop $(MYSQL_NAME)
 
+source:
+	curl -i -X POST http://localhost:8083/connectors/ -H "Accept:application/json" -H "Content-Type:application/json" -d @scripts/source.json
+
+sink:
+	curl -X DELETE http://localhost:8083/connectors/jdbc-sink-connector
+	curl -i -X POST http://localhost:8083/connectors/ -H "Accept:application/json" -H "Content-Type:application/json" -d @scripts/sink.json
+
 .PHONY: start stop restart clean startdb stopdb
