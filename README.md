@@ -158,8 +158,6 @@ curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.13-3.8.0.tgz" -o ~/Downlo
 ![demo2 info](images/demo2.png)
 ## Quick start
 ```bash
-# curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" https://localhost:8083/connectors/ -k -d @sink-mysql.json
-# curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" https://localhost:8083/connectors/ -k -d @source-mysql.json
 make startdb
 docker compose up -d 
 
@@ -525,7 +523,7 @@ CREATE USER 'root'@'host.docker.internal' IDENTIFIED BY '';
 GRANT ALL PRIVILEGES ON *.* TO 'root'@'host.docker.internal' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 
----mysql
+-- mysql
 CREATE TABLE db_kafka.E00Status (
     id INT AUTO_INCREMENT PRIMARY KEY,
     status VARCHAR(50) NOT NULL,
@@ -534,16 +532,75 @@ CREATE TABLE db_kafka.E00Status (
 
 # Check consumer can catch the change or not
 docker exec -it kafka1 kafka-console-consumer --bootstrap-server kafka1:9092 --topic E00Status --from-beginning
-```
-```
-{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"default":0,"field":"id"},{"type":"string","optional":false,"field":"status"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"default":0,"field":"created_at"}],"optional":true,"name":"source.public.E00Status.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"default":0,"field":"id"},{"type":"string","optional":false,"field":"status"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"default":0,"field":"created_at"}],"optional":true,"name":"source.public.E00Status.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"int64","optional":true,"field":"ts_us"},{"type":"int64","optional":true,"field":"ts_ns"},{"type":"string","optional":false,"field":"schema"},{"type":"string","optional":false,"field":"table"},{"type":"int64","optional":true,"field":"txId"},{"type":"int64","optional":true,"field":"lsn"},{"type":"int64","optional":true,"field":"xmin"}],"optional":false,"name":"io.debezium.connector.postgresql.Source","field":"source"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"name":"event.block","version":1,"field":"transaction"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"int64","optional":true,"field":"ts_us"},{"type":"int64","optional":true,"field":"ts_ns"}],"optional":false,"name":"source.public.E00Status.Envelope","version":2},"payload":{"before":null,"after":{"id":129,"status":"New Status","created_at":1730146428291556},"source":{"version":"3.0.0.Final","connector":"postgresql","name":"source","ts_ms":1730121228291,"snapshot":"false","db":"db_kafka","sequence":"[\"479248232\",\"479248288\"]","ts_us":1730121228291988,"ts_ns":1730121228291988000,"schema":"public","table":"E00Status","txId":1047,"lsn":479248288,"xmin":null},"transaction":null,"op":"c","ts_ms":1730121228361,"ts_us":1730121228361569,"ts_ns":1730121228361569048}}
-```
-```
+
 docker exec -it debezium ls /kafka/connect/debezium-connector-jdbc | grep "mysql"
-docker cp ./mysql-connector-j-8.0.31/mysql-connector-j-8.0.31.jar debezium:/kafka/connect/debezium-connector-jdbc
+docker cp ./mysql-connector-j-8.0.31/mysql-connector-j-8.0.31.jar debezium:/kafka/connect/debezium-connector-jdbc/mysql-connector-java-8.0.31.jar
 docker exec -it debezium rm -rdf /kafka/connect/debezium-connector-jdbc/mysql-connector-j-9.0.0.jar
-docker exec -it debezium mv /kafka/connect/debezium-connector-jdbc/mysql-connector-j-8.0.31.jar /kafka/connect/debezium-connector-jdbc/mysql-connector-java-8.0.31.jar
 
 docker logs debezium > a.txt
-
+```
+Bug:
+```
+org.apache.kafka.connect.errors.ConnectException: Failed to process a sink record
+Caused by: java.lang.NullPointerException: Cannot invoke "org.apache.kafka.connect.data.Schema.name()" because the return value of "org.apache.kafka.connect.sink.SinkRecord.valueSchema()" is null
+```
+- `scripts/source.json`
+```
+{
+    "name": "debezium-postgres-connector",
+    "config": {
+        "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+        "tasks.max": "1",
+        "database.hostname": "host.docker.internal",
+        "database.port": "5432",
+        "database.user": "user_kafka",
+        "database.password": "1234",
+        "database.dbname": "db_kafka",
+        "database.server.name": "source",
+        "plugin.name": "pgoutput",
+        "slot.name": "debezium",
+        "publication.name": "dbz_publication",
+        "table.include.list": "public.E00Status",
+        "database.history.kafka.bootstrap.servers": "kafka1:29092",
+        "database.history.kafka.topic": "schema-changes.sales",
+        "topic.prefix": "source",
+        "transforms": "route",
+        "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+        "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
+        "transforms.route.replacement": "$3",
+        "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "key.converter.schemas.enable": "true",
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable": "true"
+    }
+}
+```
+- `scripts/sink.json`
+```
+{
+    "name": "jdbc-sink-connector",
+    "config": {
+        "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
+        "tasks.max": "1",
+        "topics": "E00Status",
+        "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
+        "connection.username": "user_kafka",
+        "connection.password": "Admin@123",
+        "auto.create": "true",
+        "auto.evolve": "true",
+        "insert.mode": "upsert",
+        "primary.key.fields": "id",
+        "primary.key.mode": "record_key",
+        "schema.evolution": "basic",
+        "transforms": "unwrap",
+        "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+        "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "key.converter.schemas.enable": "true",
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable": "true",
+        "errors.log.enable": "true",
+        "errors.log.include.messages": "true",
+        "errors.tolerance": "all"
+    }
+}
 ```

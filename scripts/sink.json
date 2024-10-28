@@ -18,9 +18,6 @@
         "key.converter": "org.apache.kafka.connect.json.JsonConverter",
         "key.converter.schemas.enable": "true",
         "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-        "value.converter.schemas.enable": "true",
-        "errors.log.enable": "true",
-        "errors.log.include.messages": "true",
-        "errors.tolerance": "all"
+        "value.converter.schemas.enable": "true"
     }
 }
