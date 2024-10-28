@@ -498,18 +498,6 @@ curl http://localhost:8083/connectors/
 ```
 
 
-```
--- Grant access to root from host.docker.internal without a password
-CREATE USER 'root'@'host.docker.internal' IDENTIFIED BY '';
-GRANT ALL PRIVILEGES ON *.* TO 'root'@'host.docker.internal' WITH GRANT OPTION;
-FLUSH PRIVILEGES;
-
-
-
-
-```
-
-
 3. Verify Data Flow (DBeaver for viewing)
    - PostgreSQL to Kafka: To test the data flow, modify a record in the PostgreSQL source database (insert, update, or delete). The Debezium source connector should capture the change and publish it to the Kafka topic.
    - Kafka to MySQL: The JDBC sink connector will pick up this change and apply it to your MySQL destination.
@@ -529,3 +517,33 @@ For troubleshooting: `docker logs debezium`
   - [mysql to mysql](https://medium.com/@alexander.murylev/kafka-connect-debezium-mysql-source-sink-replication-pipeline-fb4d7e9df790)
   - [Dezebium for postgres](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)
   
+
+# Some tries on Demo2:
+```
+-- Grant access to root from host.docker.internal without a password
+CREATE USER 'root'@'host.docker.internal' IDENTIFIED BY '';
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'host.docker.internal' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+
+---mysql
+CREATE TABLE db_kafka.E00Status (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    status VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+# Check consumer can catch the change or not
+docker exec -it kafka1 kafka-console-consumer --bootstrap-server kafka1:9092 --topic E00Status --from-beginning
+```
+```
+{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"default":0,"field":"id"},{"type":"string","optional":false,"field":"status"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"default":0,"field":"created_at"}],"optional":true,"name":"source.public.E00Status.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"default":0,"field":"id"},{"type":"string","optional":false,"field":"status"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"default":0,"field":"created_at"}],"optional":true,"name":"source.public.E00Status.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"int64","optional":true,"field":"ts_us"},{"type":"int64","optional":true,"field":"ts_ns"},{"type":"string","optional":false,"field":"schema"},{"type":"string","optional":false,"field":"table"},{"type":"int64","optional":true,"field":"txId"},{"type":"int64","optional":true,"field":"lsn"},{"type":"int64","optional":true,"field":"xmin"}],"optional":false,"name":"io.debezium.connector.postgresql.Source","field":"source"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"name":"event.block","version":1,"field":"transaction"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"int64","optional":true,"field":"ts_us"},{"type":"int64","optional":true,"field":"ts_ns"}],"optional":false,"name":"source.public.E00Status.Envelope","version":2},"payload":{"before":null,"after":{"id":129,"status":"New Status","created_at":1730146428291556},"source":{"version":"3.0.0.Final","connector":"postgresql","name":"source","ts_ms":1730121228291,"snapshot":"false","db":"db_kafka","sequence":"[\"479248232\",\"479248288\"]","ts_us":1730121228291988,"ts_ns":1730121228291988000,"schema":"public","table":"E00Status","txId":1047,"lsn":479248288,"xmin":null},"transaction":null,"op":"c","ts_ms":1730121228361,"ts_us":1730121228361569,"ts_ns":1730121228361569048}}
+```
+```
+docker exec -it debezium ls /kafka/connect/debezium-connector-jdbc | grep "mysql"
+docker cp ./mysql-connector-j-8.0.31/mysql-connector-j-8.0.31.jar debezium:/kafka/connect/debezium-connector-jdbc
+docker exec -it debezium rm -rdf /kafka/connect/debezium-connector-jdbc/mysql-connector-j-9.0.0.jar
+docker exec -it debezium mv /kafka/connect/debezium-connector-jdbc/mysql-connector-j-8.0.31.jar /kafka/connect/debezium-connector-jdbc/mysql-connector-java-8.0.31.jar
+
+docker logs debezium > a.txt
+
+```
