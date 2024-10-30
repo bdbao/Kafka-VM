@@ -158,22 +158,24 @@ curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.13-3.8.0.tgz" -o ~/Downlo
 ![demo2 info](images/demo2.png)
 ## Quick start
 ```bash
-make startdb
-docker compose up -d 
+git clone https://github.com/bdbao/Kafka-VM
+cd Kafka-VM
 
-make source
-make sink
+brew install postgresql@16 # or: postgresql
+brew install mysql
+
+make startdb
+
+psql -U postgres
+
 
 psql -h localhost -U user_kafka -d db_kafka
-  \c db_kafka;
-
   -- Create a sample table named 'E00Status'
   CREATE TABLE "E00Status" (
       id SERIAL PRIMARY KEY,
       status VARCHAR(50) NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
-
   -- Insert sample data into the E00Status table
   INSERT INTO "E00Status" (status) VALUES
   ('Active'),
@@ -182,9 +184,16 @@ psql -h localhost -U user_kafka -d db_kafka
   ('Completed'),
   ('Failed');
 
-psql -h localhost -U user_kafka -d db_kafka
   INSERT INTO "E00Status" (status) VALUES ('New Status');
-mysql -h localhost -P 3306 -u user_kafka -d db_kafka -p
+  DELETE FROM "E00Status" WHERE id = 3;
+  UPDATE "E00Status" SET status = 'Archived' WHERE id = 2;
+
+mysql -h localhost -P 3306 -u user_kafka -p
+  CREATE TABLE db_kafka.E00Status (id INT AUTO_INCREMENT PRIMARY KEY, status VARCHAR(50) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+
+docker compose up -d
+make source
+make sink
 
 make clean
 make stop
@@ -195,9 +204,9 @@ cd Kafka-VM
 docker compose up -d
 
 brew services start postgresql@16
-brew services start mysql
+(brew services start mysql)
 brew services stop postgresql@16
-brew services stop mysql
+(brew services stop mysql)
 ```
 - Open: http://localhost:9000 to access the Kafka UI and inspect the topics and messages.
 
@@ -340,12 +349,11 @@ psql -h localhost -U user_kafka -d db_kafka
   INSERT INTO "E00Status" (status) VALUES ('New Status');
 
 docker exec -it kafka1 /usr/bin/kafka-console-consumer --bootstrap-server localhost:29092 --topic source.E00Status --from-beginning
-
 ```
 Check if the connector is created and running:
 ```bash
 curl http://localhost:8083/connectors/
-# You should see the `["debezium-postgres-connector"]% ` in the list of connectors
+# Output: `["debezium-postgres-connector"]%`
 ```
 2. Create the JDBC Sink Connector
 ```bash
@@ -388,17 +396,18 @@ mysql --version
 mysql -h localhost -P 3306 -u user_kafka -p # pass: Admin@123
 ```
 
-2.1. (Fix the bug: org.hibernate.exception.GenericJDBCException: Unable to acquire JDBC Connection [Connections could not be acquired from the underlying database!]) Add MySQL JDBC Driver to Kafka in Docker
-Download: https://downloads.mysql.com/archives/get/p/3/file/mysql-connector-j-8.0.31.zip
+2.1. (Fix the bug: ***org.hibernate.exception.GenericJDBCException: Unable to acquire JDBC Connection [Connections could not be acquired from the underlying database!]***) 
+- Add **MySQL JDBC Driver** to Kafka in Docker\
+Download: [Here](https://downloads.mysql.com/archives/get/p/3/file/mysql-connector-j-8.0.31.zip)
 ```bash
-docker volume create kafka-jdbc
-docker run --rm -v kafka-jdbc:/jdbc busybox mkdir /jdbc/lib
-
+# docker volume create kafka-jdbc
+# docker run --rm -v kafka-jdbc:/jdbc busybox mkdir /jdbc/lib
 # docker cp ./mysql-connector-j-8.0.31/mysql-connector-j-8.0.31.jar $(docker create --rm -v kafka-jdbc:/jdbc busybox):/jdbc/lib/
 docker cp ./mysql-connector-j-8.0.31/mysql-connector-j-8.0.31.jar debezium:/jdbc/lib/
 docker exec -it debezium ls /jdbc/lib # check file .jar exists
-
-# Update docker-compose.yml
+```
+Update `docker-compose.yml` as in [here](https://github.com/bdbao/Kafka-VM/blob/27555ef1c7caf88a8c8330e7f49b12b444445bec/docker-compose.yml) (in comment part).
+```bash
 docker-compose down
 docker-compose up -d
 ```
@@ -412,7 +421,7 @@ curl -X POST http://localhost:8083/connectors \
   "config": {
     "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
     "tasks.max": "1",
-    "topics": "source.E00Status",
+    "topics": "E00Status",
     "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
     "connection.username": "user_kafka",
     "connection.password": "Admin@123",
@@ -431,59 +440,6 @@ curl -X POST http://localhost:8083/connectors \
     "hibernate.dialect": "org.hibernate.dialect.MySQL8Dialect"
   }
 }'
-
-# script short oke
-curl -i -X POST http://localhost:8083/connectors/ \
--H "Accept:application/json" \
--H "Content-Type:application/json" \
--d '{
-  "name": "jdbc-sink-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
-    "tasks.max": "1",
-    "topics": "source.E00Status",
-    "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
-    "connection.username": "user_kafka",
-    "connection.password": "Admin@123",
-    "auto.create": "true",
-    "auto.evolve": "true",
-    "insert.mode": "upsert",
-    "primary.key.fields": "id",
-    "primary.key.mode": "record_key",
-    "schema.evolution": "basic",
-    "transforms": "unwrap",
-    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
-    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "key.converter.schemas.enable": "true",
-    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "value.converter.schemas.enable": "true"
-  }
-}'
-curl -i -X POST http://localhost:8083/connectors/ \
--H "Accept:application/json" \
--H "Content-Type:application/json" \
--d '{
-  "name": "jdbc-sink-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
-    "tasks.max": "3",
-    "topics": "E00Status",
-    "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
-    "connection.username": "user_kafka",
-    "connection.password": "Admin@123",
-    "auto.create": "true",
-    "auto.evolve": "true",
-    "insert.mode": "upsert",
-    "primary.key.mode": "record_key",
-    "schema.evolution": "basic",
-    "transforms": "unwrap",
-    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
-    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "key.converter.schemas.enable": "true",
-    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-    "value.converter.schemas.enable": "true"
-  }
-}'
 ```
 Output is like:
 ```
@@ -492,31 +448,10 @@ Output is like:
 Check the status of the JDBC connector:
 ```bash
 curl http://localhost:8083/connectors/
-# The connector should appear in the list with the name `["debezium-postgres-connector","jdbc-sink-connector"]%`
+# Output: `["debezium-postgres-connector","jdbc-sink-connector"]%`
 ```
 
-
-3. Verify Data Flow (DBeaver for viewing)
-   - PostgreSQL to Kafka: To test the data flow, modify a record in the PostgreSQL source database (insert, update, or delete). The Debezium source connector should capture the change and publish it to the Kafka topic.
-   - Kafka to MySQL: The JDBC sink connector will pick up this change and apply it to your MySQL destination.
-   - **Fix DBeaver** for MySQL: "Public Key Retrieval is not allowed":
-     + Right-click your connection, choose "Edit Connection"
-      + On the "Connection settings" screen (main screen), click on "Driver properties"
-      + Set these two properties: "allowPublicKeyRetrieval" to true and "useSSL" to false
-
-For troubleshooting: `docker logs debezium`
-
-# Some notes:
-- Host Db on local machine, host airflow/kafka on Docker:
-  - Call db_url from local machine: `localhost`
-  - Call db_url form Docker container: `host.docker.internal`
-- Some other repo:
-  - [mysql to postgres](https://blog.devgenius.io/change-data-capture-from-mysql-to-postgresql-using-kafka-connect-and-debezium-ae8740ef3a1d)
-  - [mysql to mysql](https://medium.com/@alexander.murylev/kafka-connect-debezium-mysql-source-sink-replication-pipeline-fb4d7e9df790)
-  - [Dezebium for postgres](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)
-  
-
-# Some tries on Demo2:
+2.2. (Fix the bug: ***org.apache.kafka.connect.errors.ConnectException: Exiting WorkerSinkTask due to unrecoverable exception. at org.apache.kafka.connect.runtime.WorkerSinkTask.deliverMessages(WorkerSinkTask.java:635) at***) 
 ```
 -- Grant access to root from host.docker.internal without a password
 CREATE USER 'root'@'host.docker.internal' IDENTIFIED BY '';
@@ -604,3 +539,22 @@ Caused by: java.lang.NullPointerException: Cannot invoke "org.apache.kafka.conne
     }
 }
 ```
+
+3. Verify Data Flow (DBeaver for viewing)
+   - PostgreSQL to Kafka: To test the data flow, modify a record in the PostgreSQL source database (insert, update, or delete). The Debezium source connector should capture the change and publish it to the Kafka topic.
+   - Kafka to MySQL: The JDBC sink connector will pick up this change and apply it to your MySQL destination.
+   - **Fix DBeaver** for MySQL: "Public Key Retrieval is not allowed":
+     + Right-click your connection, choose "Edit Connection"
+      + On the "Connection settings" screen (main screen), click on "Driver properties"
+      + Set these two properties: "allowPublicKeyRetrieval" to true and "useSSL" to false
+
+For troubleshooting: `docker logs debezium`
+
+# Some notes:
+- Host Db on local machine, host airflow/kafka on Docker:
+  - Call db_url from local machine: `localhost`
+  - Call db_url form Docker container: `host.docker.internal`
+- Some other repo:
+  - [MySQL to PostgreSQL, demo-3](https://blog.devgenius.io/change-data-capture-from-mysql-to-postgresql-using-kafka-connect-and-debezium-ae8740ef3a1d)
+  - [MySQL to MySQL](https://medium.com/@alexander.murylev/kafka-connect-debezium-mysql-source-sink-replication-pipeline-fb4d7e9df790)
+  - [Dezebium doc for PostgreSQL](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)

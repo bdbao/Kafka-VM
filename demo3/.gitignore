@@ -1,0 +1,4 @@
+.DS_Store
+
+confluentinc-kafka-connect-jdbc-10.8.0/*
+!confluentinc-kafka-connect-jdbc-10.8.0/lib
