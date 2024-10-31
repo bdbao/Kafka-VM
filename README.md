@@ -163,59 +163,104 @@ cd Kafka-VM
 
 brew install postgresql@16 # or: postgresql
 brew install mysql
-
 make startdb
 
 psql -U postgres
+  # add new user
+  CREATE USER user_kafka WITH PASSWORD '1234';
+  ALTER USER user_kafka WITH SUPERUSER; # (optional)
+  ALTER USER user_kafka WITH REPLICATION;
 
+  \du
+  \q # quit
 
-psql -h localhost -U user_kafka -d db_kafka
-  -- Create a sample table named 'E00Status'
+psql -h localhost -U user_kafka -d postgres
+  SHOW config_file;
+  # Go to file, change `wal_level = logical`, uncomment this line
+  # brew services restart postgresql@16
+  SHOW wal_level;
+
+  CREATE DATABASE db_kafka;
+  GRANT ALL PRIVILEGES ON DATABASE db_kafka TO user_kafka;
+  \l # list all db
+  
+  \c db_kafka
+  # Create a sample table named 'E00Status'
   CREATE TABLE "E00Status" (
       id SERIAL PRIMARY KEY,
       status VARCHAR(50) NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
-  -- Insert sample data into the E00Status table
-  INSERT INTO "E00Status" (status) VALUES
-  ('Active'),
-  ('Inactive'),
-  ('Pending'),
-  ('Completed'),
-  ('Failed');
+  # Insert sample data into the E00Status table
+  INSERT INTO "E00Status" (status) VALUES ('Active'), ('Inactive'), ('Pending'), ('Completed'), ('Failed');
+  
+  \dt # list all tables in db
 
-  INSERT INTO "E00Status" (status) VALUES ('New Status');
-  DELETE FROM "E00Status" WHERE id = 3;
-  UPDATE "E00Status" SET status = 'Archived' WHERE id = 2;
+mysql -u root
+  CREATE USER 'user_kafka'@'localhost' IDENTIFIED BY 'Admin@123'; # (use % for any host)
+  GRANT ALL ON *.* TO 'user_kafka'@'localhost' WITH GRANT OPTION;
+  FLUSH PRIVILEGES; # apply changes
+  SHOW GRANTS FOR 'user_kafka'@'localhost';
+  # list all users
+  SELECT User, Host FROM mysql.user;
 
-mysql -h localhost -P 3306 -u user_kafka -p
+  \q # quit
+
+mysql -h localhost -P 3306 -u user_kafka -p # Pass: Admin@123
+  CREATE DATABASE db_kafka;
+  USE db_kafka;
+
   CREATE TABLE db_kafka.E00Status (id INT AUTO_INCREMENT PRIMARY KEY, status VARCHAR(50) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+
+  SHOW TABLES;
 
 docker compose up -d
 make source
 make sink
-
-make clean
+```
+- Open: http://localhost:9000 to access the Kafka UI.\
+  Open **DBeaver** for viewing databases.
+```sql
+-- Change source database for Capture Data Change (CDC)
+-- Run: psql -h localhost -U user_kafka -d db_kafka
+INSERT INTO "E00Status" (status) VALUES ('New Status');
+UPDATE "E00Status" SET status = 'Archived' WHERE id = 2;
+DELETE FROM "E00Status" WHERE id = 3; -- not capture yet
+```
+- (Optional) Delete user and database:
+```bash
+psql -U postgres
+  DROP DATABASE db_kafka;
+  DROP PUBLICATION dbz_publication;
+  DROP USER user_kafka;
+mysql -u root
+  DROP DATABASE db_kafka;
+  DROP USER 'user_kafka'@'localhost';
+  FLUSH PRIVILEGES;
+```
+```bash
+make clean # delete connections on Kafka
 make stop
 ```
+This is **DONE**!
 ## Build from scratch
 ```bash
 cd Kafka-VM
-docker compose up -d
 
-brew services start postgresql@16
-(brew services start mysql)
-brew services stop postgresql@16
-(brew services stop mysql)
+brew install postgresql@16 # or: postgresql
+brew install mysql
+make startdb
+
+docker compose up -d
 ```
 - Open: http://localhost:9000 to access the Kafka UI and inspect the topics and messages.
 
 To demonstrate the Debezium Postgres **source** connector and JDBC **sink** connector using your Docker Compose setup, you need to follow these steps:
-1. Create the PostgreSQL Source Connector:
+1. Create PostgreSQL database-user and the PostgreSQL Source Connector:
 ```bash
 psql -U postgres
   \l # list all db
-  \c db_airflow # choose db
+  \c your_db # choose db
   \dt # list all tables in db
 
   # create db
@@ -249,20 +294,21 @@ psql -U postgres
   ALTER USER your_username WITH PASSWORD 'new_password';
 
   \q # quit psql postgres
-
-# (Fix the bug) connection 1
+```
+1.1. Fix the bug: Change `wal_level` to `logical`
+```bash
 psql -h localhost -U user_kafka -d db_kafka # Check connection to db
   SHOW config_file;
   # Change `wal_level = logical`, uncomment this line
   # brew services restart postgresql@16
   SHOW wal_level;
 
-  # If create new one: delete old Replication slot, or change 'slot.name'
+  # (Optional) If create new one: delete old Replication slot, or change 'slot.name'
   SELECT * FROM pg_replication_slots;
   SELECT pg_drop_replication_slot('debezium');
   SELECT * FROM pg_replication_slots;
-
-
+```
+```bash
 # Send the connector configuration to Kafka Connect. 
 # This will create the Debezium source connector that reads changes from your PostgreSQL database and publishes them to the Kafka topic.
 curl -X POST http://localhost:8083/connectors \
@@ -291,54 +337,20 @@ curl -X POST http://localhost:8083/connectors \
     "transforms.route.replacement": "$3"
   }
 }'
-
-# script short ok
-curl -i -X POST http://localhost:8083/connectors/ \
--H "Accept:application/json" \
--H "Content-Type:application/json" \
--d '{
-  "name": "debezium-postgres-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-    "tasks.max": "1",
-    "database.hostname": "host.docker.internal",
-    "database.port": "5432",
-    "database.user": "user_kafka",
-    "database.password": "1234",
-    "database.dbname": "db_kafka",
-    "database.server.name": "source",
-    "plugin.name": "pgoutput",
-    "slot.name": "debezium",
-    "publication.name": "dbz_publication",
-    "table.include.list": "E00Status",
-    "database.history.kafka.bootstrap.servers": "kafka1:29092",
-    "database.history.kafka.topic": "schema-changes.sales",
-    "topic.prefix": "source",
-    "transforms": "route",
-    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
-    "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
-    "transforms.route.replacement": "$3"
-  }
-}'
-
 ```
 Output is like:
 ```
 {"name":"debezium-postgres-connector","config":{"connector.class":"io.debezium.connector.postgresql.PostgresConnector","tasks.max":"1","database.hostname":"host.docker.internal","database.port":"5432","database.user":"user_kafka","database.password":"1234","database.dbname":"db_kafka","database.server.name":"source","plugin.name":"pgoutput","slot.name":"debezium","publication.name":"dbz_publication","table.include.list":"E00Status","database.history.kafka.bootstrap.servers":"kafka1:29092","database.history.kafka.topic":"schema-changes.sales","topic.prefix":"source","transforms":"route","transforms.route.type":"org.apache.kafka.connect.transforms.RegexRouter","transforms.route.regex":"([^.]+)\\.([^.]+)\\.([^.]+)","transforms.route.replacement":"$3","name":"debezium-postgres-connector"},"tasks":[],"type":"source"}%
 ```
-- Script to capture the change:
+- Script to **Create sample table** for Capture Data Change:
 ```bash
 psql -h localhost -U user_kafka -d db_kafka
-  \c db_kafka;
-
-  -- Create a sample table named 'E00Status'
   CREATE TABLE "E00Status" (
       id SERIAL PRIMARY KEY,
       status VARCHAR(50) NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
-  -- Insert sample data into the E00Status table
   INSERT INTO "E00Status" (status) VALUES
   ('Active'),
   ('Inactive'),
@@ -347,15 +359,18 @@ psql -h localhost -U user_kafka -d db_kafka
   ('Failed');
 
   INSERT INTO "E00Status" (status) VALUES ('New Status');
+  UPDATE "E00Status" SET status = 'Archived' WHERE id = 2;
+  DELETE FROM "E00Status" WHERE id = 3; # Not capture yet
 
+# Check the consumer
 docker exec -it kafka1 /usr/bin/kafka-console-consumer --bootstrap-server localhost:29092 --topic source.E00Status --from-beginning
 ```
 Check if the connector is created and running:
 ```bash
-curl http://localhost:8083/connectors/
+curl http://localhost:8083/connectors
 # Output: `["debezium-postgres-connector"]%`
 ```
-2. Create the JDBC Sink Connector
+2. Create MySQL database-user and the JDBC Sink Connector
 ```bash
 mysql -u root
 mysql -u root -p # if you’ve set a password
@@ -391,12 +406,17 @@ mysql -u root -p # if you’ve set a password
 
   \q # quit mysql
 
-mysql --version
+mysql --version # See the version for choosing `MySQL8Dialect`
 
 mysql -h localhost -P 3306 -u user_kafka -p # pass: Admin@123
+  CREATE TABLE db_kafka.E00Status (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      status VARCHAR(50) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
 ```
 
-2.1. (Fix the bug: ***org.hibernate.exception.GenericJDBCException: Unable to acquire JDBC Connection [Connections could not be acquired from the underlying database!]***) 
+2.1. Fix the bug: ***org.hibernate.exception.GenericJDBCException: Unable to acquire JDBC Connection [Connections could not be acquired from the underlying database!]***
 - Add **MySQL JDBC Driver** to Kafka in Docker\
 Download: [Here](https://downloads.mysql.com/archives/get/p/3/file/mysql-connector-j-8.0.31.zip)
 ```bash
@@ -406,14 +426,14 @@ Download: [Here](https://downloads.mysql.com/archives/get/p/3/file/mysql-connect
 docker cp ./mysql-connector-j-8.0.31/mysql-connector-j-8.0.31.jar debezium:/jdbc/lib/
 docker exec -it debezium ls /jdbc/lib # check file .jar exists
 ```
-Update `docker-compose.yml` as in [here](https://github.com/bdbao/Kafka-VM/blob/27555ef1c7caf88a8c8330e7f49b12b444445bec/docker-compose.yml) (in comment part).
+- Update `docker-compose.yml` as in [here](https://github.com/bdbao/Kafka-VM/blob/27555ef1c7caf88a8c8330e7f49b12b444445bec/docker-compose.yml) (in comment part).
 ```bash
 docker-compose down
 docker-compose up -d
 ```
 ```bash
 # Send the sink connector configuration
-# topic: {database.server.name}.{table_name}
+# topic: {table_name}
 curl -X POST http://localhost:8083/connectors \
 -H "Content-Type: application/json" \
 -d '{
@@ -451,93 +471,79 @@ curl http://localhost:8083/connectors/
 # Output: `["debezium-postgres-connector","jdbc-sink-connector"]%`
 ```
 
-2.2. (Fix the bug: ***org.apache.kafka.connect.errors.ConnectException: Exiting WorkerSinkTask due to unrecoverable exception. at org.apache.kafka.connect.runtime.WorkerSinkTask.deliverMessages(WorkerSinkTask.java:635) at***) 
-```
--- Grant access to root from host.docker.internal without a password
-CREATE USER 'root'@'host.docker.internal' IDENTIFIED BY '';
-GRANT ALL PRIVILEGES ON *.* TO 'root'@'host.docker.internal' WITH GRANT OPTION;
-FLUSH PRIVILEGES;
-
--- mysql
-CREATE TABLE db_kafka.E00Status (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    status VARCHAR(50) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
+2.2. Fix the bug: ***org.apache.kafka.connect.errors.ConnectException: Exiting WorkerSinkTask due to unrecoverable exception. at org.apache.kafka.connect.runtime.WorkerSinkTask.deliverMessages(WorkerSinkTask.java:635) at***
+```bash
 # Check consumer can catch the change or not
-docker exec -it kafka1 kafka-console-consumer --bootstrap-server kafka1:9092 --topic E00Status --from-beginning
 
 docker exec -it debezium ls /kafka/connect/debezium-connector-jdbc | grep "mysql"
 docker cp ./mysql-connector-j-8.0.31/mysql-connector-j-8.0.31.jar debezium:/kafka/connect/debezium-connector-jdbc/mysql-connector-java-8.0.31.jar
 docker exec -it debezium rm -rdf /kafka/connect/debezium-connector-jdbc/mysql-connector-j-9.0.0.jar
 
-docker logs debezium > a.txt
+docker logs debezium > log_debezium.txt
 ```
-Bug:
-```
-org.apache.kafka.connect.errors.ConnectException: Failed to process a sink record
-Caused by: java.lang.NullPointerException: Cannot invoke "org.apache.kafka.connect.data.Schema.name()" because the return value of "org.apache.kafka.connect.sink.SinkRecord.valueSchema()" is null
-```
-- `scripts/source.json`
-```
-{
-    "name": "debezium-postgres-connector",
-    "config": {
-        "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-        "tasks.max": "1",
-        "database.hostname": "host.docker.internal",
-        "database.port": "5432",
-        "database.user": "user_kafka",
-        "database.password": "1234",
-        "database.dbname": "db_kafka",
-        "database.server.name": "source",
-        "plugin.name": "pgoutput",
-        "slot.name": "debezium",
-        "publication.name": "dbz_publication",
-        "table.include.list": "public.E00Status",
-        "database.history.kafka.bootstrap.servers": "kafka1:29092",
-        "database.history.kafka.topic": "schema-changes.sales",
-        "topic.prefix": "source",
-        "transforms": "route",
-        "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
-        "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
-        "transforms.route.replacement": "$3",
-        "key.converter": "org.apache.kafka.connect.json.JsonConverter",
-        "key.converter.schemas.enable": "true",
-        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-        "value.converter.schemas.enable": "true"
-    }
-}
-```
-- `scripts/sink.json`
-```
-{
-    "name": "jdbc-sink-connector",
-    "config": {
-        "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
-        "tasks.max": "1",
-        "topics": "E00Status",
-        "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
-        "connection.username": "user_kafka",
-        "connection.password": "Admin@123",
-        "auto.create": "true",
-        "auto.evolve": "true",
-        "insert.mode": "upsert",
-        "primary.key.fields": "id",
-        "primary.key.mode": "record_key",
-        "schema.evolution": "basic",
-        "transforms": "unwrap",
-        "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
-        "key.converter": "org.apache.kafka.connect.json.JsonConverter",
-        "key.converter.schemas.enable": "true",
-        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
-        "value.converter.schemas.enable": "true",
-        "errors.log.enable": "true",
-        "errors.log.include.messages": "true",
-        "errors.tolerance": "all"
-    }
-}
+2.3. Fix the bug (in `log_debezium.txt`): ***org.apache.kafka.connect.errors.ConnectException: Failed to process a sink record. Caused by: java.lang.NullPointerException: Cannot invoke "org.apache.kafka.connect.data.Schema.name()" because the return value of "org.apache.kafka.connect.sink.SinkRecord.valueSchema()" is null***
+```bash
+make clean
+
+curl -X POST http://localhost:8083/connectors \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "debezium-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "host.docker.internal",
+    "database.port": "5432",
+    "database.user": "user_kafka",
+    "database.password": "1234",
+    "database.dbname": "db_kafka",
+    "database.server.name": "source",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium",
+    "publication.name": "dbz_publication",
+    "table.include.list": "public.E00Status",
+    "database.history.kafka.bootstrap.servers": "kafka1:29092",
+    "database.history.kafka.topic": "schema-changes.sales",
+    "topic.prefix": "source",
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
+    "transforms.route.replacement": "$3",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true"
+  }
+}'
+
+curl -X POST http://localhost:8083/connectors \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "jdbc-sink-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
+    "tasks.max": "1",
+    "topics": "E00Status",
+    "connection.url": "jdbc:mysql://host.docker.internal:3306/db_kafka",
+    "connection.username": "user_kafka",
+    "connection.password": "Admin@123",
+    "auto.create": "true",
+    "auto.evolve": "true",
+    "insert.mode": "upsert",
+    "primary.key.fields": "id",
+    "primary.key.mode": "record_key",
+    "schema.evolution": "basic",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "errors.tolerance": "all"
+  }
+}'
 ```
 
 3. Verify Data Flow (DBeaver for viewing)
@@ -551,10 +557,10 @@ Caused by: java.lang.NullPointerException: Cannot invoke "org.apache.kafka.conne
 For troubleshooting: `docker logs debezium`
 
 # Some notes:
-- Host Db on local machine, host airflow/kafka on Docker:
+- Host DB on local machine, host airflow/kafka on Docker:
   - Call db_url from local machine: `localhost`
   - Call db_url form Docker container: `host.docker.internal`
-- Some other repo:
+- Some other resource:
   - [MySQL to PostgreSQL, demo-3](https://blog.devgenius.io/change-data-capture-from-mysql-to-postgresql-using-kafka-connect-and-debezium-ae8740ef3a1d)
   - [MySQL to MySQL](https://medium.com/@alexander.murylev/kafka-connect-debezium-mysql-source-sink-replication-pipeline-fb4d7e9df790)
   - [Dezebium doc for PostgreSQL](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)

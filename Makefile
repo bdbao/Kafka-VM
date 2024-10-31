@@ -6,8 +6,8 @@ start:
 	echo "Starting $(POSTGRES_NAME), $(MYSQL_NAME) and container $(CONTAINER_NAME)..."
 	brew services start $(POSTGRES_NAME)
 	brew services start $(MYSQL_NAME)
-#	docker compose up -d
 	docker start $(CONTAINER_NAMES)
+#	docker compose up -d
 	echo "Kafka UI is running at http://localhost:9000"
 
 stop:
@@ -15,6 +15,7 @@ stop:
 	brew services stop $(POSTGRES_NAME)
 	brew services stop $(MYSQL_NAME)
 	docker stop $(CONTAINER_NAMES)
+#	docker compose down
 
 restart:
 	echo "Restarting $(POSTGRES_NAME) and container $(CONTAINER_NAME)..."
@@ -25,7 +26,6 @@ restart:
 clean:
 	curl -X DELETE http://localhost:8083/connectors/debezium-postgres-connector
 	curl -X DELETE http://localhost:8083/connectors/jdbc-sink-connector
-#	docker compose down
 
 startdb:
 	echo "Starting $(POSTGRES_NAME), $(MYSQL_NAME)..."
