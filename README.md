@@ -170,7 +170,7 @@ psql -U postgres
   CREATE USER user_kafka WITH PASSWORD '1234';
   ALTER USER user_kafka WITH SUPERUSER; # (optional)
   ALTER USER user_kafka WITH REPLICATION;
-
+  # list all users
   \du
   \q # quit
 
@@ -185,13 +185,12 @@ psql -h localhost -U user_kafka -d postgres
   \l # list all db
   
   \c db_kafka
-  # Create a sample table named 'E00Status'
+
   CREATE TABLE "E00Status" (
       id SERIAL PRIMARY KEY,
       status VARCHAR(50) NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
-  # Insert sample data into the E00Status table
   INSERT INTO "E00Status" (status) VALUES ('Active'), ('Inactive'), ('Pending'), ('Completed'), ('Failed');
   
   \dt # list all tables in db
@@ -363,7 +362,7 @@ psql -h localhost -U user_kafka -d db_kafka
   DELETE FROM "E00Status" WHERE id = 3; # Not capture yet
 
 # Check the consumer
-docker exec -it kafka1 /usr/bin/kafka-console-consumer --bootstrap-server localhost:29092 --topic source.E00Status --from-beginning
+docker exec -it kafka1 /usr/bin/kafka-console-consumer --bootstrap-server localhost:29092 --topic E00Status --from-beginning
 ```
 Check if the connector is created and running:
 ```bash
@@ -414,6 +413,8 @@ mysql -h localhost -P 3306 -u user_kafka -p # pass: Admin@123
       status VARCHAR(50) NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
+
+  (DELETE FROM db_kafka.E00Status WHERE id=3;)
 ```
 
 2.1. Fix the bug: ***org.hibernate.exception.GenericJDBCException: Unable to acquire JDBC Connection [Connections could not be acquired from the underlying database!]***
