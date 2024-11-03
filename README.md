@@ -156,7 +156,37 @@ curl "https://downloads.apache.org/kafka/3.8.0/kafka_2.13-3.8.0.tgz" -o ~/Downlo
 
 # Demo 2: Streamming between 2 DBMS using Kafka on Docker
 ![demo2 info](images/demo2.png)
-## Quick start
+## Quick start 1 (Host database on Docker)
+```bash
+git clone https://github.com/bdbao/Kafka-VM
+cd Kafka-VM
+
+docker compose -f database_docker/docker-compose.yml up -d
+docker compose up -d
+
+make source
+make sink
+
+mysql -h 127.0.0.1 -P 3306 -u user_kafka -p db_kafka # pass: Admin@123
+  CREATE TABLE db_kafka.E00Status (id INT AUTO_INCREMENT PRIMARY KEY, status VARCHAR(50) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+  
+psql -h localhost -U user_kafka -d db_kafka # pass: 1234
+  CREATE TABLE "E00Status" (id SERIAL PRIMARY KEY, status VARCHAR(50) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+  INSERT INTO "E00Status" (status) VALUES ('Active'), ('Inactive'), ('Pending'), ('Completed'), ('Failed');
+  INSERT INTO "E00Status" (status) VALUES ('New Status');
+  UPDATE "E00Status" SET status = 'Archived' WHERE id = 2;
+```
+- Open: http://localhost:9000 to access the Kafka UI.\
+  Open **DBeaver** for viewing databases.
+
+```bash
+make clean # delete connections on Kafka
+docker compose -f database_docker/docker-compose.yml down -v
+docker compose down
+```
+This is **DONE**!
+
+## Quick start 2 (Host database on local)
 ```bash
 git clone https://github.com/bdbao/Kafka-VM
 cd Kafka-VM
@@ -191,8 +221,6 @@ psql -h localhost -U user_kafka -d postgres
       status VARCHAR(50) NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
-  INSERT INTO "E00Status" (status) VALUES ('Active'), ('Inactive'), ('Pending'), ('Completed'), ('Failed');
-  
   \dt # list all tables in db
 
 mysql -u root
@@ -210,7 +238,6 @@ mysql -h localhost -P 3306 -u user_kafka -p # Pass: Admin@123
   USE db_kafka;
 
   CREATE TABLE db_kafka.E00Status (id INT AUTO_INCREMENT PRIMARY KEY, status VARCHAR(50) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-
   SHOW TABLES;
 
 docker compose up -d
@@ -219,9 +246,11 @@ make sink
 ```
 - Open: http://localhost:9000 to access the Kafka UI.\
   Open **DBeaver** for viewing databases.
+
+Change source database for Change Data Capture (CDC)
 ```sql
--- Change source database for Capture Data Change (CDC)
 -- Run: psql -h localhost -U user_kafka -d db_kafka
+INSERT INTO "E00Status" (status) VALUES ('Active'), ('Inactive'), ('Pending'), ('Completed'), ('Failed');
 INSERT INTO "E00Status" (status) VALUES ('New Status');
 UPDATE "E00Status" SET status = 'Archived' WHERE id = 2;
 DELETE FROM "E00Status" WHERE id = 3; -- not capture yet
@@ -341,7 +370,7 @@ Output is like:
 ```
 {"name":"debezium-postgres-connector","config":{"connector.class":"io.debezium.connector.postgresql.PostgresConnector","tasks.max":"1","database.hostname":"host.docker.internal","database.port":"5432","database.user":"user_kafka","database.password":"1234","database.dbname":"db_kafka","database.server.name":"source","plugin.name":"pgoutput","slot.name":"debezium","publication.name":"dbz_publication","table.include.list":"E00Status","database.history.kafka.bootstrap.servers":"kafka1:29092","database.history.kafka.topic":"schema-changes.sales","topic.prefix":"source","transforms":"route","transforms.route.type":"org.apache.kafka.connect.transforms.RegexRouter","transforms.route.regex":"([^.]+)\\.([^.]+)\\.([^.]+)","transforms.route.replacement":"$3","name":"debezium-postgres-connector"},"tasks":[],"type":"source"}%
 ```
-- Script to **Create sample table** for Capture Data Change:
+- Script to **Create sample table** for Change Data Capture:
 ```bash
 psql -h localhost -U user_kafka -d db_kafka
   CREATE TABLE "E00Status" (
@@ -558,9 +587,12 @@ curl -X POST http://localhost:8083/connectors \
 For troubleshooting: `docker logs debezium`
 
 # Some notes:
-- Host DB on local machine, host airflow/kafka on Docker:
-  - Call db_url from local machine: `localhost`
-  - Call db_url form Docker container: `host.docker.internal`
+- Host DB on local machine / different container:
+  - Call db_server from local machine, use: `localhost`
+  - Call db_server from Docker container: `host.docker.internal`
+- Host DB on the same container (in same file **docker-compose.yml**) like **demo-3**:
+  - Call db_server from local machine, still use: `localhost`
+  - Call db_server from that Docker container: `localhost` or ***service-name***
 - Some other resource:
   - [MySQL to PostgreSQL, demo-3](https://blog.devgenius.io/change-data-capture-from-mysql-to-postgresql-using-kafka-connect-and-debezium-ae8740ef3a1d)
   - [MySQL to MySQL](https://medium.com/@alexander.murylev/kafka-connect-debezium-mysql-source-sink-replication-pipeline-fb4d7e9df790)

@@ -1,0 +1,27 @@
+version: '3'
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: user_kafka
+      POSTGRES_PASSWORD: 1234
+      POSTGRES_DB: db_kafka
+    ports:
+      - "5432:5432"
+    command: [ "postgres", "-c", "wal_level=logical" ]
+
+  mysql:
+    image: mysql:9
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_USER: user_kafka
+      MYSQL_PASSWORD: Admin@123
+      MYSQL_DATABASE: db_kafka
+      ALLOW_PUBLIC_KEY_RETRIEVAL: "true"
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql # Docker-managed volume for MySQL data
+
+volumes:
+  mysql_data:
